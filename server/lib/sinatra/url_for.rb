@@ -18,7 +18,7 @@ module Sinatra
       when :path_only
         base = request.script_name
       when :full
-        scheme = request.scheme
+        scheme = request.scheme || "http"
         if (scheme == 'http' && request.port == 80 ||
             scheme == 'https' && request.port == 443)
           port = ""
@@ -30,7 +30,14 @@ module Sinatra
       else
         raise TypeError, "Unknown url_for mode #{mode}"
       end
-      "#{base}#{url_fragment}"
+      # Don't add the base fragment if url_for
+      # gets called more than once per url or
+      # the url_fragment passed in is an absolute url
+      if url_fragment.match(/^#{base}/) or url_fragment.match(/^http/)
+        url_fragment
+      else
+        "#{base}#{url_fragment}"
+      end
     end
 
     def root_url

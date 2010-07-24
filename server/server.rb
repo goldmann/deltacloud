@@ -90,7 +90,7 @@ error Deltacloud::BackendError do
 end
 
 # Redirect to /api
-get '/' do redirect '/api'; end
+get '/' do redirect url_for('/api'); end
 
 get '/api\/?' do
     @version = 1.0
