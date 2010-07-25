@@ -255,7 +255,7 @@ module DeltaCloud
       realm_id = opts[:realm]
       user_data = opts[:user_data]
 
-      params = {}
+      params = opts.dup
       ( params[:realm_id] = realm_id ) if realm_id
       ( params[:name] = name ) if name
       ( params[:user_data] = user_data ) if user_data
@@ -263,6 +263,7 @@ module DeltaCloud
       if opts[:hardware_profile].is_a?(String)
         params[:hwp_id] = opts[:hardware_profile]
       elsif opts[:hardware_profile].is_a?(Hash)
+        params.delete(:hardware_profile)
         opts[:hardware_profile].each do |k,v|
           params[:"hwp_#{k}"] = v
         end
