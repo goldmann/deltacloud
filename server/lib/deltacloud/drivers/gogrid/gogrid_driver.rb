@@ -37,27 +37,39 @@ class GogridDriver < Deltacloud::BaseDriver
 
   feature :instances, :authentication_password
 
-  define_hardware_profile 'server' do
+  define_hardware_profile '512MB' do
+    cpu            0.5
+    memory         512
+    storage        30
+  end
+
+  define_hardware_profile '1GB' do
+    cpu            1
+    memory         1
+    storage        60
+  end
+
+  define_hardware_profile '2GB' do
     cpu            2
-    memory         [512, 1024, 2048, 4096, 8192]
-    storage        10
+    memory         2
+    storage        120
+  end
+
+  define_hardware_profile '4GB' do
+    cpu            4
+    memory         4
+    storage        240
+  end
+
+  define_hardware_profile '8GB' do
+    cpu            8
+    memory         8
+    storage        480
   end
 
   def supported_collections
-    DEFAULT_COLLECTIONS.reject { |c| [ :storage_volumes, :storage_snapshots ].include?(c) }
-  end
-
-  # The only valid option for flavors is server RAM for now
-  def flavors(credentials, opts=nil)
-    flavors = []
-    safely do
-      flavors=new_client(credentials).request('common/lookup/list', { 'lookup' => 'server.ram' })['list'].collect do |flavor|
-        convert_flavor(flavor)
-      end
-    end
-    flavors = filter_on( flavors, :id, opts )
-    flavors = filter_on( flavors, :architecture, opts )
-    flavors
+    DEFAULT_COLLECTIONS.reject! { |c| [ :storage_volumes, :storage_snapshots ].include?(c) }
+    DEFAULT_COLLECTIONS + [ :keys ]
   end
 
   def images(credentials, opts=nil)
@@ -86,20 +98,23 @@ class GogridDriver < Deltacloud::BaseDriver
   end
 
   def create_instance(credentials, image_id, opts=nil)
-    server_ram = nil
-    if opts[:hwp_memory]
-      mem = opts[:hwp_memory].to_i
-      server_ram = (mem == 512) ? "512MB" : "#{mem / 1024}GB"
+    image = image(credentials, :id => image_id )
+    if opts && opts[:hwp_id]
+      hwp = find_hardware_profile(credentials, opts[:hwp_id], image.id)
     else
-      server_ram = "512MB"
+      hwp = find_hardware_profile(credentials, "512MB", image.id)
     end
+
     client = new_client(credentials)
     name = (opts[:name] && opts[:name]!='') ? opts[:name] : get_random_instance_name
+    if name.length > 20
+      raise Deltacloud::BackendError.new(400, "name-too-long", "Name '#{name}' is too long; the maximum for GoGrid is 20 characters", nil)
+    end
     safely do
       instance = client.request('grid/server/add', {
         'name' => name,
         'image' => image_id,
-        'server.ram' => server_ram,
+        'server.ram' => hwp.name,
         'ip' => get_next_free_ip(credentials)
       })['list'].first
       if instance
@@ -151,7 +166,7 @@ class GogridDriver < Deltacloud::BaseDriver
         if e.message == "400 Bad Request"
           # in the case of a VM that we just made, the grid/server/get method
           # throws a "400 Bad Request error".  In this case we try again by
-          # getting a full listing a filtering on the id.  This could
+          # getting a full listing and filtering on the id.  This could
           # potentially take a long time, but I don't see another way to get
           # information about a newly created instance
           instances = list_instances(credentials, opts[:id])
@@ -188,6 +203,19 @@ class GogridDriver < Deltacloud::BaseDriver
     end
   end
 
+  def key(credentials, opts=nil)
+    keys(credentials, opts).first
+  end
+
+  def keys(credentials, opts=nil)
+    gogrid = new_client( credentials )
+    creds = []
+    gogrid.request('support/password/list')['list'].each do |password|
+      creds << convert_key(password)
+    end
+    return creds
+  end
+
   define_instance_states do
     start.to( :pending )         .automatically
     pending.to( :running )       .automatically
@@ -219,6 +247,15 @@ class GogridDriver < Deltacloud::BaseDriver
     return login_data
   end
 
+  def convert_key(password)
+    Key.new({
+      :id => password['id'],
+      :username => password['username'],
+      :password => password['password'],
+      :credential_type => :password
+    })
+  end
+
   def convert_image(gg_image, owner_id=nil)
     Image.new( {
       :id=>gg_image['id'],
@@ -237,15 +274,6 @@ class GogridDriver < Deltacloud::BaseDriver
     end
   end
 
-  def convert_flavor(flavor)
-    Flavor.new(
-      :id => flavor['id'],
-      :architecture => 'x86',
-      :memory => flavor['name'].tr('G', ''),
-      :storage => '1'
-    )
-  end
-
   def convert_realm(realm)
     Realm.new(
       :id => realm['id'],
@@ -260,16 +288,7 @@ class GogridDriver < Deltacloud::BaseDriver
   end
 
   def convert_instance(instance, owner_id)
-    opts = {}
-    unless instance['ram']['id'] == "1"
-      mem = instance['ram']['name']
-      if mem == "512MB"
-        opts[:hwp_memory] = "512"
-      else
-        opts[:hwp_memory] = (mem.to_i * 1024).to_s
-      end
-    end
-    prof = InstanceProfile.new("server", opts)
+    hwp_name = instance['image']['name']
 
     Instance.new(
        # note that we use 'name' as the id here, because newly created instances
@@ -279,8 +298,7 @@ class GogridDriver < Deltacloud::BaseDriver
       :id => instance['name'],
       :owner_id => owner_id,
       :image_id => instance['image']['id'],
-      :flavor_id => instance['ram']['id'],
-      :instance_profile => prof,
+      :instance_profile => InstanceProfile.new(hwp_name),
       :name => instance['name'],
       :realm_id => instance['type']['id'],
       :state => convert_server_state(instance['state']['name'], instance['id']),
@@ -316,7 +334,7 @@ class GogridDriver < Deltacloud::BaseDriver
     begin
       block.call
     rescue Exception => e
-      puts "ERROR: #{e.message}"
+      raise Deltacloud::BackendError.new(500, e.class.to_s, e.message, e.backtrace)
     end
   end
 

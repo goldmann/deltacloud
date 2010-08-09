@@ -29,11 +29,13 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   def hardware_profiles(credentials, opts = nil)
     racks = new_client( credentials )
-    results = racks.list_flavors.map do |flav|
-      HardwareProfile.new(flav["id"].to_s) do
-        architecture 'x86_64'
-        memory flav["ram"].to_i
-        storage flav["disk"].to_i
+    safely do
+      results = racks.list_flavors.map do |flav|
+        HardwareProfile.new(flav["id"].to_s) do
+          architecture 'x86_64'
+          memory flav["ram"].to_i
+          storage flav["disk"].to_i
+        end
       end
     end
     filter_hardware_profiles(results, opts)
@@ -41,14 +43,16 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   def images(credentials, opts=nil)
     racks = new_client( credentials )
-    results = racks.list_images.map do |img|
-      Image.new( {
-                   :id=>img["id"].to_s,
-                   :name=>img["name"],
-                   :description => img["name"] + " " + img["status"] + "",
-                   :owner_id=>"root",
-                   :architecture=>'x86_64'
-                 } )
+    safely do
+      results = racks.list_images.map do |img|
+        Image.new( {
+                     :id=>img["id"].to_s,
+                     :name=>img["name"],
+                     :description => img["name"] + " " + img["status"] + "",
+                     :owner_id=>"root",
+                     :architecture=>'x86_64'
+                   } )
+      end
     end
     results.sort_by{|e| [e.description]}
     results = filter_on( results, :id, opts )
@@ -66,7 +70,14 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   def reboot_instance(credentials, id)
     racks = new_client(credentials)
-    racks.reboot_server(id)
+    safely do
+      racks.reboot_server(id)
+    end
+    Instance.new( {
+      :id => id,
+      :state => "REBOOT",
+      :actions => instance_actions_for( state ),
+    } )
   end
 
   def stop_instance(credentials, id)
@@ -75,7 +86,14 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   def destroy_instance(credentials, id)
     racks = new_client(credentials)
-    racks.delete_server(id)
+    safely do
+      racks.delete_server(id)
+    end
+    Instance.new( {
+      :id => id,
+      :state => "STOPPED",
+      :actions => instance_actions_for( "STOPPED" ),
+    } )
   end
 
 
@@ -88,7 +106,9 @@ class RackspaceDriver < Deltacloud::BaseDriver
     hwp_id = opts[:hwp_id] || 1
     name = Time.now.to_s
     if (opts[:name]) then name = opts[:name] end
-    convert_srv_to_instance(racks.start_server(image_id, hwp_id, name))
+    safely do
+      return convert_srv_to_instance(racks.start_server(image_id, hwp_id, name))
+    end
   end
 
   #
@@ -97,12 +117,14 @@ class RackspaceDriver < Deltacloud::BaseDriver
   def instances(credentials, opts=nil)
     racks = new_client(credentials)
     instances = []
-    if (opts.nil?)
-      instances = racks.list_servers.map do |srv|
-        convert_srv_to_instance(srv)
+    safely do
+      if (opts.nil?)
+        instances = racks.list_servers.map do |srv|
+          convert_srv_to_instance(srv)
+        end
+      else
+        instances << convert_srv_to_instance(racks.load_server_details(opts[:id]))
       end
-    else
-      instances << convert_srv_to_instance(racks.load_server_details(opts[:id]))
     end
     instances = filter_on( instances, :id, opts )
     instances = filter_on( instances, :state, opts )
@@ -111,7 +133,6 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
 
   def convert_srv_to_instance(srv)
-    status = srv["status"] == "ACTIVE" ? "RUNNING" : "PENDING"
     inst = Instance.new(:id => srv["id"].to_s,
                         :owner_id => "root",
                         :realm_id => "us")
@@ -128,7 +149,9 @@ class RackspaceDriver < Deltacloud::BaseDriver
   end
 
   def new_client(credentials)
-    RackspaceClient.new(credentials.user, credentials.password)
+    safely do
+      return RackspaceClient.new(credentials.user, credentials.password)
+    end
   end
 
   define_instance_states do
@@ -142,6 +165,14 @@ class RackspaceDriver < Deltacloud::BaseDriver
     shutting_down.to( :stopped )  .automatically
 
     stopped.to( :finish )         .automatically
+  end
+
+  def safely(&block)
+    begin
+      block.call
+    rescue Exception => e
+      raise Deltacloud::BackendError.new(500, e.class.to_s, e.message, e.backtrace)
+    end
   end
 
 end

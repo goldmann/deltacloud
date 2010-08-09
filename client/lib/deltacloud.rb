@@ -191,12 +191,13 @@ module DeltaCloud
                   end
                 # Property attribute is handled differently
                 when "property":
-                  define_method :"#{attribute['name'].sanitize}" do
-                    if attribute['value'] =~ /^(\d+)$/
-                      DeltaCloud::HWP::FloatProperty.new(attribute, attribute['name'])
-                    else
-                      DeltaCloud::HWP::Property.new(attribute, attribute['name'])
-                    end
+                  attr_accessor :"#{attribute['name'].sanitize}"
+                  if attribute['value'] =~ /^(\d+)$/
+                    obj.send(:"#{attribute['name'].sanitize}=",
+                      DeltaCloud::HWP::FloatProperty.new(attribute, attribute['name']))
+                  else
+                    obj.send(:"#{attribute['name'].sanitize}=",
+                      DeltaCloud::HWP::Property.new(attribute, attribute['name']))
                   end
                 # Public and private addresses are returned as Array
                 when "public_addresses", "private_addresses":
@@ -239,6 +240,17 @@ module DeltaCloud
       end
       declare_entry_points_methods(@entry_points)
     end
+    
+    def create_instance_credential(opts={}, &block)
+      params = { :name => opts[:name] }
+      instance_credential = nil
+      request(:post, entry_points[:instance_credentials], {}, params) do |response|
+        c = DeltaCloud.define_class("InstanceCredential")
+        instance_credential = base_object(c, :instance_credential, response)
+        yield instance_credential if block_given?
+      end
+      return instance_credential
+    end
 
     # Create a new instance, using image +image_id+. Possible optiosn are
     #
@@ -254,11 +266,13 @@ module DeltaCloud
       name = opts[:name]
       realm_id = opts[:realm]
       user_data = opts[:user_data]
+      key_name = opts[:key_name]
 
       params = opts.dup
       ( params[:realm_id] = realm_id ) if realm_id
       ( params[:name] = name ) if name
       ( params[:user_data] = user_data ) if user_data
+      ( params[:keyname] = user_data ) if key_name
 
       if opts[:hardware_profile].is_a?(String)
         params[:hwp_id] = opts[:hardware_profile]

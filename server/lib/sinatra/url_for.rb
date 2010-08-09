@@ -1,3 +1,5 @@
+require 'uri'
+
 module Sinatra
   module UrlForHelper
     # Construct a link to +url_fragment+, which should be given relative to
@@ -30,12 +32,13 @@ module Sinatra
       else
         raise TypeError, "Unknown url_for mode #{mode}"
       end
+      url_escape = URI.escape(url_fragment)
       # Don't add the base fragment if url_for gets called more than once
       # per url or the url_fragment passed in is an absolute url
-      if url_fragment.match(/^#{base}/) or url_fragment.match(/^http/)
-        url_fragment
+      if url_escape.match(/^#{base}/) or url_escape.match(/^http/)
+        url_escape
       else
-        "#{base}#{url_fragment}"
+        "#{base}#{url_escape}"
       end
     end
 

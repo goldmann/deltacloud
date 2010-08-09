@@ -100,7 +100,6 @@ END
     "owner_id" and "architecture" parameter
 END
     param :id,            :string
-    param :owner_id,      :string
     param :architecture,  :string,  :optional
     control { filter_all(:images) }
   end
@@ -175,7 +174,7 @@ END
   end
 
   operation :show do
-    description 'Show an image identified by "id" parameter.'
+    description 'Show an instance identified by "id" parameter.'
     param :id,           :string, :required
     control { show(:instance) }
   end
@@ -299,4 +298,57 @@ collection :storage_volumes do
     param :id,          :string,    :required
     control { show(:storage_volume) }
   end
+end
+
+get '/api/keys/new' do
+  respond_to do |format|
+    format.html { haml :"keys/new" }
+  end
+end
+
+collection :keys do
+  description "Instance authentication credentials"
+
+  operation :index do
+    description "List all available credentials which could be used for instance authentication"
+    control do
+      filter_all :keys
+    end
+  end
+
+  operation :show do
+    description "Show details about given instance credential"
+    param :id,  :string,  :required
+    control { show :key }
+  end
+
+  operation :create do
+    description "Create a new instance credential if backend supports this"
+    param :name,  :string,  :required
+    control do
+      unless driver.respond_to?(:create_key)
+        raise Deltacloud::BackendFeatureUnsupported.new('501',
+          'Creating instance credentials is not supported in backend')
+      end
+      @key = driver.create_key(credentials, { :key_name => params[:name] })
+      respond_to do |format|
+        format.html { haml :"keys/show" }
+        format.xml { haml :"keys/show" }
+      end
+    end
+  end
+
+  operation :destroy do
+    description "Destroy given instance credential if backend supports this"
+    param :id,  :string,  :required
+    control do
+      unless driver.respond_to?(:destroy_key)
+        raise Deltacloud::BackendFeatureUnsupported.new('501',
+          'Creating instance credentials is not supported in backend')
+      end
+      driver.destroy_key(credentials, { :key_name => params[:id]})
+      redirect(keys_url)
+    end
+  end
+
 end
