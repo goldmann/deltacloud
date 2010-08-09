@@ -33,6 +33,6 @@
   s.extra_rdoc_files = Dir["COPYING"]
 
   s.add_dependency('rest-client', '>= 1.4.2')
-  s.add_dependency('nokogiri', '>= 1.4.1')
+  s.add_dependency('nokogiri', '>= 1.5.0.beta.2')
   s.add_development_dependency('rspec', '>= 1.3.0')
 end
