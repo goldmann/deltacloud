@@ -16,7 +16,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-require 'hpricot'
+require 'nokogiri'
 require 'rest_client'
 require 'base64'
 require 'logger'
@@ -116,7 +116,7 @@ module DeltaCloud
 
     def base_object_collection(c, model, response)
       collection = []
-      Hpricot::XML(response).search("#{model}/#{model.to_s.singularize}").each do |item|
+      Nokogiri::XML(response).xpath("#{model}/#{model.to_s.singularize}").each do |item|
         c.instance_eval do
           attr_accessor :id
           attr_accessor :uri
@@ -129,7 +129,7 @@ module DeltaCloud
     # Add default attributes [id and href] to class
     def base_object(c, model, response)
       obj = nil
-      Hpricot::XML(response).search("#{model.to_s.singularize}").each do |item|
+      Nokogiri::XML(response).xpath("#{model.to_s.singularize}").each do |item|
         c.instance_eval do
           attr_accessor :id
           attr_accessor :uri
@@ -155,7 +155,7 @@ module DeltaCloud
       logger << "[DC] Creating class #{obj.class.name}\n"
       obj.instance_eval do
         # Declare methods for all attributes in object
-        item.search('./*').each do |attribute|
+        item.xpath('./*').each do |attribute|
           # If attribute is a link to another object then
           # create a method which request this object from API
           if api.entry_points.keys.include?(:"#{attribute.name}s")
@@ -174,7 +174,7 @@ module DeltaCloud
                 # to dynamicaly create .stop!, .start! methods
                 when "actions":
                   actions = []
-                  attribute.search('link').each do |link|
+                  attribute.xpath('link').each do |link|
                     actions << [link['rel'], link[:href]]
                     define_method :"#{link['rel'].sanitize}!" do
                       client.request(:"#{link['method']}", link['href'], {}, {})
@@ -203,7 +203,7 @@ module DeltaCloud
                 when "public_addresses", "private_addresses":
                   attr_accessor :"#{attribute.name.sanitize}"
                   obj.send(:"#{attribute.name.sanitize}=",
-                    attribute.search('address').collect { |address| address.text })
+                    attribute.xpath('address').collect { |address| address.text })
                 # Value for other attributes are just returned using
                 # method with same name as attribute (eg. .owner_id, .state)
                 else
@@ -222,16 +222,16 @@ module DeltaCloud
     def discover_entry_points
       return if discovered?
       request(:get, @api_uri.to_s) do |response|
-        api_xml = Hpricot::XML(response)
-        @driver_name = api_xml.search('/api').first['driver']
-        @api_version = api_xml.search('/api').first['version']
+        api_xml = Nokogiri::XML(response)
+        @driver_name = api_xml.xpath('/api').first['driver']
+        @api_version = api_xml.xpath('/api').first['version']
         logger << "[API] Version #{@api_version}\n"
         logger << "[API] Driver #{@driver_name}\n"
-        api_xml.search("api > link").each do |entry_point|
+        api_xml.css("api > link").each do |entry_point|
           rel, href = entry_point['rel'].to_sym, entry_point['href']
           @entry_points.store(rel, href)
           logger << "[API] Entry point '#{rel}' added\n"
-          entry_point.search("feature").each do |feature|
+          entry_point.css("feature").each do |feature|
             @features[rel] ||= []
             @features[rel] << feature['name'].to_sym
             logger << "[API] Feature #{feature['name']} added to #{rel}\n"
@@ -336,9 +336,9 @@ module DeltaCloud
     def instance_states
       states = []
       request(:get, entry_points[:instance_states]) do |response|
-        Hpricot::XML(response).search('states/state').each do |state_el|
+        Nokogiri::XML(response).xpath('states/state').each do |state_el|
           state = DeltaCloud::InstanceState::State.new(state_el['name'])
-          state_el.search('transition').each do |transition_el|
+          state_el.xpath('transition').each do |transition_el|
             state.transitions << DeltaCloud::InstanceState::Transition.new(
               transition_el['to'],
               transition_el['action']
@@ -363,9 +363,9 @@ module DeltaCloud
     def documentation(collection, operation=nil)
       data = {}
       request(:get, "/docs/#{collection}") do |body|
-        document = Hpricot::XML(body)
+        document = Nokogiri::XML(body)
         if operation
-          data[:description] = document.search('/docs/collection/operations/operation[@name = "'+operation+'"]/description').first
+          data[:description] = document.xpath('/docs/collection/operations/operation[@name = "'+operation+'"]/description').first
           return false unless data[:description]
           data[:params] = []
           (document/"/docs/collection/operations/operation[@name='#{operation}']/parameter").each do |param|
@@ -480,12 +480,12 @@ module DeltaCloud
             self.class.instance_eval do
               attr_reader :range
             end
-            @range = { :from => xml.search('range').first['first'], :to => xml.search('range').first['last'] }
+            @range = { :from => xml.xpath('range').first['first'], :to => xml.xpath('range').first['last'] }
           when 'enum':
             self.class.instance_eval do
               attr_reader :options
             end
-            @options = xml.search('enum/entry').collect { |e| e['value'] }
+            @options = xml.xpath('enum/entry').collect { |e| e['value'] }
         end
       end
 
