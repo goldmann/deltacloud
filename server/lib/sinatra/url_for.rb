@@ -20,7 +20,7 @@ module Sinatra
       when :path_only
         base = request.script_name
       when :full
-        scheme = request.scheme || 'http'
+        scheme = request.scheme
         if (scheme == 'http' && request.port == 80 ||
             scheme == 'https' && request.port == 443)
           port = ""
