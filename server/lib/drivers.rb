@@ -6,6 +6,7 @@ DRIVERS = {
   :rimuhosting => { :name => "RimuHosting"},
   :opennebula => { :name => "Opennebula", :class => "OpennebulaDriver" },
   :terremark => { :name => "Terremark"},
+  :virtualbox => { :name => "Virtualbox" },
   :mock => { :name => "Mock" }
 }
 
