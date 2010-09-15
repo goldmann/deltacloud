@@ -16,6 +16,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+# INSTALLATION:
+# 1. You need VirtualBox and VBoxManage tool installed
+# 2. You need to setup some images manually inside VirtualBox
+# 3. You need to install 'Guest Additions' to this images for metrics
+# 4. You need a lot of hard drive space ;-)
+
+# NETWORKING:
+# For now, the VM is always started with bridged networking. The NIC
+# it uses defaults to eth0, but may be overriden with the VIRTUALBOX_NIC
+# environment variable. This should be the NIC name as expected by Virtualbox.
+# For example, on my Macbook Pro this is 'en1: AirPort'
+
 require 'deltacloud/base_driver'
 
 module Deltacloud
@@ -109,8 +121,8 @@ module Deltacloud
 
           memory = ((memory*1.024)*1000).to_i
 
-          vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 bridged --bridgeadapter1 'en1: AirPort' --cableconnected1 on --cpus #{cpu}")
-          # vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 hostonly --hostonlyadapter1 vboxnet0 --cableconnected1 on --cpus #{cpu}")
+          nic = ENV['VIRTUALBOX_NIC'] || 'eth0'
+          vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 bridged --bridgeadapter1 '#{nic}' --cableconnected1 on --cpus #{cpu}")
 
           # Add storage
           # This will 'reuse' existing image
