@@ -29,6 +29,7 @@
 # For example, on my Macbook Pro this is 'en1: AirPort'
 
 require 'deltacloud/base_driver'
+require 'virtualbox'
 
 module Deltacloud
   module Drivers
@@ -83,14 +84,16 @@ module Deltacloud
         end
 
         def images(credentials, opts = nil)
-          images = convert_images(vbox_client('list vms'))
+          images = convert_images2(VirtualBox::VM.all)
+          # images = convert_images(vbox_client('list vms'))
           images = filter_on( images, :id, opts )
           images = filter_on( images, :architecture, opts )
           images.sort_by{|e| [e.owner_id, e.description]}
         end
 
         def instances(credentials, opts = nil)
-          instances = convert_instances(vbox_client('list vms'))
+          instances = convert_instances2(VirtualBox::VM.all)
+          # instances = convert_instances(vbox_client('list vms'))
           instances = filter_on( instances, :id, opts )
           instances = filter_on( instances, :state, opts )
           instances = filter_on( instances, :image_id, opts )
@@ -107,31 +110,41 @@ module Deltacloud
           hwp = find_hardware_profile(credentials, opts[:hwp_id], image_id)
 
           # Create new virtual machine, UUID for this machine is returned
-          vm=vbox_client("createvm --name '#{name}' --register")
-          new_uid = vm.split("\n").select { |line| line=~/^UUID/ }.first.split(':').last.strip
+          raw_vm=vbox_client("createvm --name '#{name}' --register")
+          new_uid = raw_vm.split("\n").select { |line| line=~/^UUID/ }.first.split(':').last.strip
+
+          parent_vm = VirtualBox::VM.find(instance.id)
+          vm = VirtualBox::VM.find(new_uid)
 
           # Add Hardware profile to this machine
-          memory = 0.5
-          ostype = "Linux"
-          cpu = '1'
+          memory = parent_vm.memory_size
+          ostype = parent_vm.os_type_id
+          cpu = parent_vm.cpu_count
           unless hwp.nil?
-            memory = hwp.memory.value
-            cpu = hwp.cpu.value
+            memory = ((hwp.memory.value*1.024)*1000).to_i
+            cpu = hwp.cpu.value.to_i
           end
 
-          memory = ((memory*1.024)*1000).to_i
+          vm.memory_size = memory
+          vm.os_type_id = ostype
+          vm.cpu_count = cpu
+          vm.vram_size = 16
+          vm.network_adapters[0].attachment_type = parent_vm.network_adapters[0].attachment_type
+          vm.network_adapters[0].host_interface = parent_vm.network_adapters[0].host_interface
+          vm.save
 
-          nic = ENV['VIRTUALBOX_NIC'] || 'eth0'
-          vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 bridged --bridgeadapter1 '#{nic}' --cableconnected1 on --cpus #{cpu}")
+          # nic = ENV['VIRTUALBOX_NIC'] || 'eth0'
+          # vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 bridged --bridgeadapter1 '#{nic}' --cableconnected1 on --cpus #{cpu}")
 
           # Add storage
           # This will 'reuse' existing image
-          location = instance_volume_location(instance.id)
-          new_location = File.join(File.dirname(location), name+'.vdi')
+          parent_hdd = hard_disk(parent_vm)
+          new_location = File.join(File.dirname(parent_hdd.location), "#{name}.vdi")
 
           # This need to be in fork, because it takes some time with large images
           Thread.new do
-            vbox_client("clonehd '#{location}' '#{new_location}' --format VDI")
+            parent_hdd.clone(new_location, "VDI")
+            # vbox_client("clonehd '#{location}' '#{new_location}' --format VDI")
             vbox_client("storagectl '#{new_uid}' --add ide --name 'IDE Controller' --controller PIIX4")
             vbox_client("storageattach '#{new_uid}' --storagectl 'IDE Controller' --port 0 --device 0 --type hdd --medium '#{new_location}'")
             start_instance(credentials, new_uid)
@@ -157,7 +170,9 @@ module Deltacloud
         end
 
         def destroy_instance(credentials, id)
-          vbox_client("controlvm '#{id}' poweroff")
+          vm = VirtualBox::VM.find(id)
+          vm.destroy(:destroy_medium => true)
+          # vbox_client("controlvm '#{id}' poweroff")
         end
 
         def storage_volumes(credentials, opts = nil)
@@ -175,14 +190,14 @@ module Deltacloud
         private
 
         def vbox_client(cmd)
-          # puts "!!!"
-          # puts "!!!"
-          # puts "!!! Executing cmd #{cmd}"
+          puts "!!!"
+          puts "!!!"
+          puts "!!! Executing cmd #{cmd}"
           output = `#{VBOX_MANAGE_PATH}/VBoxManage -q #{cmd}`.strip
-          # puts output
-          # puts "!!!"
-          # puts "!!!"
-          # puts
+          puts output
+          puts "!!!"
+          puts "!!!"
+          puts
           output
         end
 
@@ -213,6 +228,26 @@ module Deltacloud
           return vms
         end
 
+        def convert_instances2(instances)
+          vms = []
+          hwp_name = 'small'
+          instances.each do |instance|
+            volume = convert_volume2(instance)
+            state = convert_state(instance.state, volume)
+            ip = vbox_get_ip(instance.uuid)
+            vms << Instance.new(:id => instance.uuid,
+                                :image_id => '',
+                                :state => state,
+                                :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
+                                :realm_id => 'local',
+                                :public_addresses => ip,
+                                :private_addresses => ip,
+                                :actions => instance_actions_for(state),
+                                :instance_profile => InstanceProfile.new(hwp_name))
+          end
+          vms
+        end
+
         # Warning: You need VirtualHost guest additions for this
         def vbox_get_ip(uuid)
           raw_ip = vbox_client("guestproperty get #{uuid} /VirtualBox/GuestInfo/Net/0/V4/IP")
@@ -236,9 +271,10 @@ module Deltacloud
 
         def convert_state(state, volume)
           return 'PENDING' if volume.nil?
-          state = state.strip.upcase
+          state = state.to_s.strip.upcase
           case state
           when 'POWEROFF' then 'STOPPED'
+          when 'POWERED_OFF' then 'STOPPED'
           else
             state
           end
@@ -283,6 +319,21 @@ module Deltacloud
           )
         end
 
+        def convert_volume2(vm)
+          hdd = hard_disk(vm)
+          StorageVolume.new(:id => hdd.uuid,
+                            :created => Time.now,
+                            :state => 'AVAILABLE',
+                            :capacity => hdd.logical_size,
+                            :instance_id => vm.uuid,
+                            :device => hdd.type)
+        end
+
+        def hard_disk(vm)
+          attachment = vm.medium_attachments.select { |ma| ma.type == :hard_disk }.first
+          attachment.nil? ? nil : attachment.medium
+        end
+
         def convert_images(images)
           vms = []
           images.split("\n").each do |image|
@@ -301,6 +352,22 @@ module Deltacloud
           end
           return vms
         end
+
+        def convert_images2(images)
+          vms = []
+          images.each do |image|
+            hdd = hard_disk(image)
+            next unless hdd
+            capacity = ", #{hdd.logical_size} MBytes HDD"
+            vms << Image.new(:id => image.uuid,
+                             :name => image.name,
+                             :description => "#{image.memory_size} MB RAM, #{image.cpu_count} CPU#{capacity}",
+                             :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
+                             :architecture => `uname -m`.strip)
+          end
+          vms
+        end
+
       end
     end
   end
