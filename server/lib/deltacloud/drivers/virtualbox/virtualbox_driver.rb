@@ -84,16 +84,14 @@ module Deltacloud
         end
 
         def images(credentials, opts = nil)
-          images = convert_images2(VirtualBox::VM.all)
-          # images = convert_images(vbox_client('list vms'))
+          images = convert_images(VirtualBox::VM.all)
           images = filter_on( images, :id, opts )
           images = filter_on( images, :architecture, opts )
           images.sort_by{|e| [e.owner_id, e.description]}
         end
 
         def instances(credentials, opts = nil)
-          instances = convert_instances2(VirtualBox::VM.all)
-          # instances = convert_instances(vbox_client('list vms'))
+          instances = convert_instances(VirtualBox::VM.all)
           instances = filter_on( instances, :id, opts )
           instances = filter_on( instances, :state, opts )
           instances = filter_on( instances, :image_id, opts )
@@ -101,11 +99,11 @@ module Deltacloud
         end
 
         def create_instance(credentials, image_id, opts)
-          instance = instances(credentials, { :image_id => image_id }).first
+          image = images(credentials, { :id => image_id }).first
           name = opts[:name]
           if name.nil? or name.empty?
             # random uniqueish name w/o having to pull in UUID gem
-            name = "#{instance.name} - #{(Time.now.to_f * 1000).to_i}#{rand(1000)}"
+            name = "#{image.name} - #{(Time.now.to_f * 1000).to_i}#{rand(1000)}"
           end
           hwp = find_hardware_profile(credentials, opts[:hwp_id], image_id)
 
@@ -113,7 +111,7 @@ module Deltacloud
           raw_vm=vbox_client("createvm --name '#{name}' --register")
           new_uid = raw_vm.split("\n").select { |line| line=~/^UUID/ }.first.split(':').last.strip
 
-          parent_vm = VirtualBox::VM.find(instance.id)
+          parent_vm = VirtualBox::VM.find(image.id)
           vm = VirtualBox::VM.find(new_uid)
 
           # Add Hardware profile to this machine
@@ -124,67 +122,61 @@ module Deltacloud
             memory = ((hwp.memory.value*1.024)*1000).to_i
             cpu = hwp.cpu.value.to_i
           end
-
           vm.memory_size = memory
           vm.os_type_id = ostype
           vm.cpu_count = cpu
           vm.vram_size = 16
+          vm.network_adapters[0].enabled = true
           vm.network_adapters[0].attachment_type = parent_vm.network_adapters[0].attachment_type
           vm.network_adapters[0].host_interface = parent_vm.network_adapters[0].host_interface
           vm.save
 
-          # nic = ENV['VIRTUALBOX_NIC'] || 'eth0'
-          # vbox_client("modifyvm '#{new_uid}' --ostype #{ostype} --memory #{memory} --vram 16 --nic1 bridged --bridgeadapter1 '#{nic}' --cableconnected1 on --cpus #{cpu}")
-
-          # Add storage
-          # This will 'reuse' existing image
-          parent_hdd = hard_disk(parent_vm)
-          new_location = File.join(File.dirname(parent_hdd.location), "#{name}.vdi")
-
-          # This need to be in fork, because it takes some time with large images
+          # Clone the disk image in a separate thread because it can take a long time
           Thread.new do
+            # Reload the vm objects because they probably aren't safe to
+            # reuse across threads
+            parent_vm = VirtualBox::VM.find(image.id)
+            vm = VirtualBox::VM.find(new_uid)
+
+            # Add storage
+            # This will 'reuse' existing image
+            parent_hdd = hard_disk(parent_vm)
+            new_location = File.join(File.dirname(parent_hdd.location), "#{name}.vdi")
+
             parent_hdd.clone(new_location, "VDI")
             # vbox_client("clonehd '#{location}' '#{new_location}' --format VDI")
             vbox_client("storagectl '#{new_uid}' --add ide --name 'IDE Controller' --controller PIIX4")
             vbox_client("storageattach '#{new_uid}' --storagectl 'IDE Controller' --port 0 --device 0 --type hdd --medium '#{new_location}'")
-            start_instance(credentials, new_uid)
+            vm.start
             if opts[:user_data]
               user_data = opts[:user_data].gsub("\n", '') # remove newlines from base64 encoded text
-              vbox_client("guestproperty set #{new_uid} /Deltacloud/UserData #{user_data}")
+              vm.guest_property["/Deltacloud/UserData"] = user_data
             end
           end
           instances(credentials, :id => new_uid).first
         end
 
         def reboot_instance(credentials, id)
-          vbox_client("controlvm '#{id}' reset")
+          vm = VirtualBox::VM.find(id)
+          vm.control(:reset)
         end
 
         def stop_instance(credentials, id)
-          vbox_client("controlvm '#{id}' poweroff")
+          vm = VirtualBox::VM.find(id)
+          unless vm.shutdown
+            vm.stop
+          end
         end
 
         def start_instance(credentials, id)
-          instance = instances(credentials, { :id => id }).first
-          vbox_client("startvm '#{id}'")
+          vm = VirtualBox::VM.find(id)
+          vm.start
         end
 
         def destroy_instance(credentials, id)
           vm = VirtualBox::VM.find(id)
-          vm.destroy(:destroy_medium => true)
+          vm.destroy(:destroy_medium => :delete)
           # vbox_client("controlvm '#{id}' poweroff")
-        end
-
-        def storage_volumes(credentials, opts = nil)
-          volumes = []
-          require 'pp'
-          instances(credentials, {}).each do |image|
-            raw_image = convert_image(vbox_vm_info(image.id))
-            hdd_id = volume_uuid(raw_image)
-            next unless hdd_id
-            volumes << convert_volume(vbox_client("showhdinfo '#{hdd_id}'"))
-          end
-          filter_on( volumes, :id, opts )
         end
 
         private
@@ -207,36 +199,14 @@ module Deltacloud
 
         def convert_instances(instances)
           vms = []
-          instances.split("\n").each do |image|
-            image_id = image.match(/^\"(.+)\" \{(.+)\}$/).to_a.last
-            raw_image = convert_image(vbox_vm_info(image_id))
-            volume = convert_volume(vbox_get_volume(volume_uuid(raw_image)))
-            hwp_name = 'small'
-            vms << Instance.new({
-              :id => raw_image[:uuid],
-              :image_id => volume ? raw_image[:uuid] : '',
-              :name => raw_image[:name],
-              :state => convert_state(raw_image[:vmstate], volume),
-              :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
-              :realm_id => 'local',
-              :public_addresses => vbox_get_ip(raw_image[:uuid]),
-              :private_addresses => vbox_get_ip(raw_image[:uuid]),
-              :actions => instance_actions_for(convert_state(raw_image[:vmstate], volume)),
-              :instance_profile =>InstanceProfile.new(hwp_name)
-            })
-          end
-          return vms
-        end
-
-        def convert_instances2(instances)
-          vms = []
-          hwp_name = 'small'
+          hwp_name = 'small' # TODO: Pull from extra_data
           instances.each do |instance|
-            volume = convert_volume2(instance)
+            volume = convert_volume(instance)
             state = convert_state(instance.state, volume)
-            ip = vbox_get_ip(instance.uuid)
+            ip = vbox_get_ip(instance)
             vms << Instance.new(:id => instance.uuid,
-                                :image_id => '',
+                                :image_id => '', # TODO: Pull from extra_data
+                                :name => instance.name,
                                 :state => state,
                                 :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
                                 :realm_id => 'local',
@@ -249,24 +219,9 @@ module Deltacloud
         end
 
         # Warning: You need VirtualHost guest additions for this
-        def vbox_get_ip(uuid)
-          raw_ip = vbox_client("guestproperty get #{uuid} /VirtualBox/GuestInfo/Net/0/V4/IP")
-          raw_ip = raw_ip.split(':').last.strip
-          if raw_ip.eql?('No value set!') or raw_ip.eql?('Value')
-            return []
-          else
-            return [raw_ip]
-          end
-        end
-
-        def vbox_get_volume(uuid)
-          vbox_client("showhdinfo #{uuid}")
-        end
-
-        def volume_uuid(raw_image)
-          uuid = raw_image['ide controller-imageuuid-0-0'.to_sym]
-          uuid = raw_image['sata controller-imageuuid-0-0'.to_sym] if uuid.nil?
-          uuid
+        def vbox_get_ip(instance)
+          ip = instance.guest_property["/VirtualBox/GuestInfo/Net/0/V4/IP"]
+          ip.nil? ? [] : [ip]
         end
 
         def convert_state(state, volume)
@@ -280,47 +235,9 @@ module Deltacloud
           end
         end
 
-        def convert_image(image)
-          img = {}
-          image.split("\n").each do |i|
-            si = i.split('=')
-            key = si.first.gsub('"', '').strip.downcase
-            value = si.last.strip.gsub('"', '')
-            img[key.to_sym] = value
-          end
-          return img
-        end
-
-        def instance_volume_location(instance_id)
-          volume_uuid = volume_uuid(convert_image(vbox_vm_info(instance_id)))
-          convert_raw_volume(vbox_get_volume(volume_uuid))[:location]
-        end
-
-        def convert_raw_volume(volume)
-          vol = {}
-          volume.split("\n").each do |v|
-            v = v.split(':')
-            next unless v.first
-            vol[:"#{v.first.strip.downcase.gsub(/\W/, '-')}"] = v.last.strip
-          end
-          return vol
-        end
-
-        def convert_volume(volume)
-          vol = convert_raw_volume(volume)
-          return nil unless vol[:uuid]
-          StorageVolume.new(
-            :id => vol[:uuid],
-            :created => Time.now,
-            :state => 'AVAILABLE',
-            :capacity => vol["logical-size".to_sym],
-            :instance_id => vol["in-use-by-vms".to_sym],
-            :device => vol[:type]
-          )
-        end
-
-        def convert_volume2(vm)
+        def convert_volume(vm)
           hdd = hard_disk(vm)
+          return nil if hdd.nil?
           StorageVolume.new(:id => hdd.uuid,
                             :created => Time.now,
                             :state => 'AVAILABLE',
@@ -335,25 +252,6 @@ module Deltacloud
         end
 
         def convert_images(images)
-          vms = []
-          images.split("\n").each do |image|
-            image_id = image.match(/^\"(.+)\" \{(.+)\}$/).to_a.last
-            raw_image = convert_image(vbox_vm_info(image_id))
-            volume = convert_volume(vbox_get_volume(volume_uuid(raw_image)))
-            next unless volume
-            capacity = ", #{volume.capacity} HDD"
-            vms << Image.new(
-              :id => raw_image[:uuid],
-              :name => raw_image[:name],
-              :description => "#{raw_image[:memory]} MB RAM, #{raw_image[:cpu] || 1} CPU#{capacity}",
-              :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
-              :architecture => `uname -m`.strip
-            )
-          end
-          return vms
-        end
-
-        def convert_images2(images)
           vms = []
           images.each do |image|
             hdd = hard_disk(image)
