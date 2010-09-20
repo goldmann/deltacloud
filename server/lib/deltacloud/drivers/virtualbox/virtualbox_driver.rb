@@ -17,16 +17,10 @@
 # under the License.
 
 # INSTALLATION:
-# 1. You need VirtualBox and VBoxManage tool installed
+# 1. You need VirtualBox installed
 # 2. You need to setup some images manually inside VirtualBox
 # 3. You need to install 'Guest Additions' to this images for metrics
 # 4. You need a lot of hard drive space ;-)
-
-# NETWORKING:
-# For now, the VM is always started with bridged networking. The NIC
-# it uses defaults to eth0, but may be overriden with the VIRTUALBOX_NIC
-# environment variable. This should be the NIC name as expected by Virtualbox.
-# For example, on my Macbook Pro this is 'en1: AirPort'
 
 require 'deltacloud/base_driver'
 require 'virtualbox'
