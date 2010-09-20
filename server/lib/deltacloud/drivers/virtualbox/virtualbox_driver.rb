@@ -98,14 +98,17 @@ module Deltacloud
 
         def create_instance(credentials, image_id, opts)
           image = images(credentials, { :id => image_id }).first
+
+          # Choose a name for the new vm unless one was given
           name = opts[:name]
           if name.nil? or name.empty?
             # random uniqueish name w/o having to pull in UUID gem
             name = "#{image.name} - #{(Time.now.to_f * 1000).to_i}#{rand(1000)}"
           end
-          hwp = find_hardware_profile(credentials, opts[:hwp_id], image_id)
 
+          hwp = find_hardware_profile(credentials, opts[:hwp_id], image_id)
           parent_vm = VirtualBox::VM.find(image.id)
+
           # Create new virtual machine
           vm = VirtualBox::VM.create(name, parent_vm.os_type_id)
           new_uid = vm.uuid
@@ -113,13 +116,17 @@ module Deltacloud
           # Add Hardware profile to this machine
           vm.memory_size = ((hwp.memory.value*1.024)*1000).to_i
           vm.cpu_count = hwp.cpu.value.to_i
-          vm.extra_data['deltacloud_hwp_id'] = hwp.name
-
-          vm.os_type_id = parent_vm.os_type_id
           vm.vram_size = 16
+
+          # Copy the network adapter settings from the parent vm
           vm.network_adapters[0].enabled = true
           vm.network_adapters[0].attachment_type = parent_vm.network_adapters[0].attachment_type
           vm.network_adapters[0].host_interface = parent_vm.network_adapters[0].host_interface
+
+          # Store some metadata using extra data fields
+          vm.extra_data['deltacloud_hwp_id'] = hwp.name
+          vm.extra_data['deltacloud_image_id'] = image_id
+
           vm.save
 
           # Clone the disk image in a separate thread because it can take a long time
@@ -177,8 +184,9 @@ module Deltacloud
             state = convert_state(instance.state, volume)
             ip = vbox_get_ip(instance)
             hwp_name = instance.extra_data['deltacloud_hwp_id'] || 'small'
+            image_id = instance.extra_data['deltacloud_image_id'] || ''
             vms << Instance.new(:id => instance.uuid,
-                                :image_id => '', # TODO: Pull from extra_data
+                                :image_id => image_id,
                                 :name => instance.name,
                                 :state => state,
                                 :owner_id => ENV['USER'] || ENV['USERNAME'] || 'nobody',
