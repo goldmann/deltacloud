@@ -52,19 +52,19 @@ module Deltacloud
           architecture  `uname -m`.strip
         end
 
-        # define_hardware_profile 'medium' do
-        #   cpu           1
-        #   memory        1
-        #   storage       1
-        #   architecture  `uname -m`.strip
-        # end
+        define_hardware_profile 'medium' do
+          cpu           1
+          memory        1
+          storage       1
+          architecture  `uname -m`.strip
+        end
 
-        # define_hardware_profile 'large' do
-        #   cpu           2
-        #   memory        2
-        #   storage       1
-        #   architecture  `uname -m`.strip
-        # end
+        define_hardware_profile 'large' do
+          cpu           2
+          memory        2
+          storage       1
+          architecture  `uname -m`.strip
+        end
 
         define_instance_states do
           start.to( :pending )       .on( :create )
@@ -111,16 +111,11 @@ module Deltacloud
           new_uid = vm.uuid
 
           # Add Hardware profile to this machine
-          memory = parent_vm.memory_size
-          ostype = parent_vm.os_type_id
-          cpu = parent_vm.cpu_count
-          unless hwp.nil?
-            memory = ((hwp.memory.value*1.024)*1000).to_i
-            cpu = hwp.cpu.value.to_i
-          end
-          vm.memory_size = memory
-          vm.os_type_id = ostype
-          vm.cpu_count = cpu
+          vm.memory_size = ((hwp.memory.value*1.024)*1000).to_i
+          vm.cpu_count = hwp.cpu.value.to_i
+          vm.extra_data['deltacloud_hwp_id'] = hwp.name
+
+          vm.os_type_id = parent_vm.os_type_id
           vm.vram_size = 16
           vm.network_adapters[0].enabled = true
           vm.network_adapters[0].attachment_type = parent_vm.network_adapters[0].attachment_type
@@ -177,11 +172,11 @@ module Deltacloud
 
         def convert_instances(instances)
           vms = []
-          hwp_name = 'small' # TODO: Pull from extra_data
           instances.each do |instance|
             volume = convert_volume(instance)
             state = convert_state(instance.state, volume)
             ip = vbox_get_ip(instance)
+            hwp_name = instance.extra_data['deltacloud_hwp_id'] || 'small'
             vms << Instance.new(:id => instance.uuid,
                                 :image_id => '', # TODO: Pull from extra_data
                                 :name => instance.name,
