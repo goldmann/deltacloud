@@ -36,8 +36,6 @@ module Deltacloud
     module Virtualbox
       class VirtualboxDriver < Deltacloud::BaseDriver
 
-        VBOX_MANAGE_PATH = '/usr/bin'
-
         ( REALMS = [
           Realm.new({
             :id => 'local',
@@ -107,12 +105,10 @@ module Deltacloud
           end
           hwp = find_hardware_profile(credentials, opts[:hwp_id], image_id)
 
-          # Create new virtual machine, UUID for this machine is returned
-          raw_vm=vbox_client("createvm --name '#{name}' --register")
-          new_uid = raw_vm.split("\n").select { |line| line=~/^UUID/ }.first.split(':').last.strip
-
           parent_vm = VirtualBox::VM.find(image.id)
-          vm = VirtualBox::VM.find(new_uid)
+          # Create new virtual machine
+          vm = VirtualBox::VM.create(name, parent_vm.os_type_id)
+          new_uid = vm.uuid
 
           # Add Hardware profile to this machine
           memory = parent_vm.memory_size
@@ -143,10 +139,9 @@ module Deltacloud
             parent_hdd = hard_disk(parent_vm)
             new_location = File.join(File.dirname(parent_hdd.location), "#{name}.vdi")
 
-            parent_hdd.clone(new_location, "VDI")
-            # vbox_client("clonehd '#{location}' '#{new_location}' --format VDI")
-            vbox_client("storagectl '#{new_uid}' --add ide --name 'IDE Controller' --controller PIIX4")
-            vbox_client("storageattach '#{new_uid}' --storagectl 'IDE Controller' --port 0 --device 0 --type hdd --medium '#{new_location}'")
+            new_hd = parent_hdd.clone(new_location, "VDI")
+            vm.add_storage_controller('IDE Controller', :ide, :piix4)
+            vm.attach_storage('IDE Controller', 0, 0, :hard_disk, new_hd.uuid)
             vm.start
             if opts[:user_data]
               user_data = opts[:user_data].gsub("\n", '') # remove newlines from base64 encoded text
@@ -176,26 +171,9 @@ module Deltacloud
         def destroy_instance(credentials, id)
           vm = VirtualBox::VM.find(id)
           vm.destroy(:destroy_medium => :delete)
-          # vbox_client("controlvm '#{id}' poweroff")
         end
 
         private
-
-        def vbox_client(cmd)
-          puts "!!!"
-          puts "!!!"
-          puts "!!! Executing cmd #{cmd}"
-          output = `#{VBOX_MANAGE_PATH}/VBoxManage -q #{cmd}`.strip
-          puts output
-          puts "!!!"
-          puts "!!!"
-          puts
-          output
-        end
-
-        def vbox_vm_info(uid)
-          vbox_client("showvminfo --machinereadable '#{uid}'")
-        end
 
         def convert_instances(instances)
           vms = []
