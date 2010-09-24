@@ -186,7 +186,8 @@ class EC2Driver < Deltacloud::BaseDriver
         :monitoring_enabled => true,
         :instance_type => hwp.name,
         :disable_api_termination => false,
-        :instance_initiated_shutdown_behavior => 'terminate'
+        :instance_initiated_shutdown_behavior => 'terminate',
+        :security_group => opts[:security_group]
       )
       return convert_instance( ec2_instances.instancesSet.item.first, 'pending' )
     end
