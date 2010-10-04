@@ -288,17 +288,18 @@ module DeltaCloud
       realm_id = opts[:realm]
       user_data = opts[:user_data]
       key_name = opts[:key_name]
+      security_group = opts[:security_group]
 
-      params = opts.dup
+      params = {}
       ( params[:realm_id] = realm_id ) if realm_id
       ( params[:name] = name ) if name
       ( params[:user_data] = user_data ) if user_data
       ( params[:keyname] = key_name ) if key_name
+      ( params[:security_group] = security_group) if security_group
 
       if opts[:hardware_profile].is_a?(String)
         params[:hwp_id] = opts[:hardware_profile]
       elsif opts[:hardware_profile].is_a?(Hash)
-        params.delete(:hardware_profile)
         opts[:hardware_profile].each do |k,v|
           params[:"hwp_#{k}"] = v
         end
