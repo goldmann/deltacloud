@@ -9,6 +9,7 @@ require 'sinatra/lazy_auth'
 require 'erb'
 require 'haml'
 require 'open3'
+require 'lib/deltacloud/helpers/blob_stream'
 
 configure do
   set :raise_errors => false
@@ -37,11 +38,16 @@ error Deltacloud::BackendError do
   report_error(500, "backend_error")
 end
 
+Sinatra::Application.register Sinatra::RespondTo
+
 # Redirect to /api
 get '/' do redirect url_for('/api'); end
 
 get '/api\/?' do
     @version = 0.1
+    if params[:force_auth]
+      return [401, 'Authentication failed'] unless driver.valid_credentials?(credentials)
+    end
     respond_to do |format|
         format.xml { haml :"api/show" }
         format.json do
@@ -71,7 +77,8 @@ END
 
   operation :index do
     description <<END
-    Operation will list all available realms. For specific architecture use "architecture" parameter.
+    Operation will list all available realms. Realms can be filtered using
+    the "architecture" parameter.
 END
     param :id,            :string
     param :architecture,  :string,  :optional,  [ 'i386', 'x86_64' ]
@@ -95,9 +102,9 @@ END
 
   operation :index do
     description <<END
-    The instances collection will return a set of all images
-    available to the current use. You can filter images using
-    "owner_id" and "architecture" parameter
+    The images collection will return a set of all images
+    available to the current use. Images can be filtered using the
+    "owner_id" and "architecture" parameters.
 END
     param :id,            :string
     param :architecture,  :string,  :optional
@@ -135,7 +142,10 @@ collection :instance_states do
         format.png do
           # Trick respond_to into looking up the right template for the
           # graphviz file
-          format(:gv); gv = erb :"instance_states/show"; format(:png)
+          format_backup = format
+          format(:gv)
+          gv = erb(:"instance_states/show")
+          format(format_backup)
           png =  ''
           cmd = 'dot -Kdot -Gpad="0.2,0.2" -Gsize="5.0,8.0" -Gdpi="180" -Tpng'
           Open3.popen3( cmd ) do |stdin, stdout, stderr|
@@ -143,6 +153,7 @@ collection :instance_states do
             stdin.close()
             png = stdout.read
           end
+          content_type 'image/png'
           png
         end
       end
@@ -167,7 +178,7 @@ collection :instances do
 END
 
   operation :index do
-    description "List all instances"
+    description "List all instances."
     param :id,            :string,  :optional
     param :state,         :string,  :optional
     control { filter_all(:instances) }
@@ -180,7 +191,7 @@ END
   end
 
   operation :create do
-    description "Create a new instance"
+    description "Create a new instance."
     param :image_id,     :string, :required
     param :realm_id,     :string, :optional
     param :hwp_id,       :string, :optional
@@ -203,25 +214,25 @@ END
   end
 
   operation :reboot, :method => :post, :member => true do
-    description "Reboot running instance"
+    description "Reboot a running instance."
     param :id,           :string, :required
     control { instance_action(:reboot) }
   end
 
   operation :start, :method => :post, :member => true do
-    description "Start an instance"
+    description "Start an instance."
     param :id,           :string, :required
     control { instance_action(:start) }
   end
 
   operation :stop, :method => :post, :member => true do
-    description "Stop running instance"
+    description "Stop a running instance."
     param :id,           :string, :required
     control { instance_action(:stop) }
   end
 
   operation :destroy do
-    description "Destroy instance"
+    description "Destroy an instance."
     param :id,           :string, :required
     control { instance_action(:destroy) }
   end
@@ -236,7 +247,7 @@ collection :hardware_profiles do
 END
 
   operation :index do
-    description "List of available hardware profiles"
+    description "List of available hardware profiles."
     param :id,          :string
     param :architecture,  :string,  :optional,  [ 'i386', 'x86_64' ]
     control do
@@ -250,7 +261,7 @@ END
   end
 
   operation :show do
-    description "Show specific hardware profile"
+    description "Show specific hardware profile."
     param :id,          :string,    :required
     control do
       @profile =  driver.hardware_profile(credentials, params[:id])
@@ -272,13 +283,13 @@ collection :storage_snapshots do
   description "Storage snapshots description here"
 
   operation :index do
-    description "Listing of storage snapshots"
+    description "List of storage snapshots."
     param :id,            :string
     control { filter_all(:storage_snapshots) }
   end
 
   operation :show do
-    description "Show storage snapshot"
+    description "Show storage snapshot."
     param :id,          :string,    :required
     control { show(:storage_snapshot) }
   end
@@ -288,13 +299,13 @@ collection :storage_volumes do
   description "Storage volumes description here"
 
   operation :index do
-    description "Listing of storage volumes"
+    description "List of storage volumes."
     param :id,            :string
     control { filter_all(:storage_volumes) }
   end
 
   operation :show do
-    description "Show storage volume"
+    description "Show storage volume."
     param :id,          :string,    :required
     control { show(:storage_volume) }
   end
@@ -307,23 +318,23 @@ get '/api/keys/new' do
 end
 
 collection :keys do
-  description "Instance authentication credentials"
+  description "Instance authentication credentials."
 
   operation :index do
-    description "List all available credentials which could be used for instance authentication"
+    description "List all available credentials which could be used for instance authentication."
     control do
       filter_all :keys
     end
   end
 
   operation :show do
-    description "Show details about given instance credential"
+    description "Show details about given instance credential."
     param :id,  :string,  :required
     control { show :key }
   end
 
   operation :create do
-    description "Create a new instance credential if backend supports this"
+    description "Create a new instance credential if backend supports this."
     param :name,  :string,  :required
     control do
       unless driver.respond_to?(:create_key)
@@ -339,7 +350,7 @@ collection :keys do
   end
 
   operation :destroy do
-    description "Destroy given instance credential if backend supports this"
+    description "Destroy given instance credential if backend supports this."
     param :id,  :string,  :required
     control do
       unless driver.respond_to?(:destroy_key)
@@ -348,6 +359,80 @@ collection :keys do
       end
       driver.destroy_key(credentials, { :key_name => params[:id]})
       redirect(keys_url)
+    end
+  end
+
+end
+
+get '/api/buckets/:bucket/:blob' do
+  @blob = driver.blob(credentials, { :id => params[:blob], 'bucket' => params[:bucket]})
+  if @blob
+    respond_to do |format|
+      format.html { haml :"blobs/show" }
+      format.xml { haml :"blobs/show" }
+      format.json { convert_to_json(blobs, @blob) }
+      end
+  else
+      report_error(404, 'not_found')
+  end
+end
+
+get '/api/buckets/new' do
+  respond_to do |format|
+    format.html { haml :"buckets/new" }
+  end
+end
+
+
+get '/api/buckets/:bucket/:blob/content' do
+  @blob = driver.blob(credentials, { :id => params[:blob], 'bucket' => params[:bucket]})
+  params['content_length'] = @blob.content_length
+  params['content_type'] = @blob.content_type
+  BlobStream.call(env, credentials, params)
+end
+
+collection :buckets do
+  description "Cloud Storage buckets - aka buckets|directories|folders"
+
+  operation :index do
+    description "List buckets associated with this account"
+    param :id,        :string
+    param :name,      :string
+    param :size,      :string
+    control { filter_all(:buckets) }
+  end
+
+  operation :show do
+    description "Show bucket"
+    param :id,        :string
+    control { show(:bucket) }
+  end
+
+  operation :create do
+    description "Create a new bucket (POST /api/buckets)"
+    param :name,      :string,    :required
+    control do
+      @bucket = driver.create_bucket(credentials, params[:name], params)
+      respond_to do |format|
+        format.xml do
+          response.status = 201  # Created
+          response['Location'] = bucket_url(@bucket.id)
+          haml :"buckets/show"
+        end
+        format.html do
+          redirect bucket_url(@bucket.id) if @bucket and @bucket.id
+          redirect buckets_url
+        end
+      end
+    end
+  end
+
+  operation :destroy do
+    description "Delete a bucket by name - bucket must be empty"
+    param :id,    :string,    :required
+    control do
+      driver.delete_bucket(credentials, params[:id], params)
+      redirect(buckets_url)
     end
   end
 

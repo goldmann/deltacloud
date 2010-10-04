@@ -18,6 +18,7 @@
 
 require 'deltacloud/base_driver'
 require 'deltacloud/drivers/rackspace/rackspace_client'
+require 'cloudfiles'
 
 module Deltacloud
   module Drivers
@@ -27,8 +28,13 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   feature :instances, :user_name
 
+  def supported_collections
+    DEFAULT_COLLECTIONS + [ :buckets ]
+  end
+
   def hardware_profiles(credentials, opts = nil)
     racks = new_client( credentials )
+    results=""
     safely do
       results = racks.list_flavors.map do |flav|
         HardwareProfile.new(flav["id"].to_s) do
@@ -43,6 +49,7 @@ class RackspaceDriver < Deltacloud::BaseDriver
 
   def images(credentials, opts=nil)
     racks = new_client( credentials )
+    results=""
     safely do
       results = racks.list_images.map do |img|
         Image.new( {
@@ -75,8 +82,8 @@ class RackspaceDriver < Deltacloud::BaseDriver
     end
     Instance.new( {
       :id => id,
-      :state => "REBOOT",
-      :actions => instance_actions_for( state ),
+      :state => "RUNNING",
+      :actions => instance_actions_for( "RUNNING" ),
     } )
   end
 
@@ -131,6 +138,97 @@ class RackspaceDriver < Deltacloud::BaseDriver
     instances
   end
 
+  def valid_credentials?(credentials)
+    begin
+      new_client(credentials)
+    rescue
+      return false
+    end
+    true
+  end
+
+
+
+
+  define_instance_states do
+    start.to( :pending )          .on( :create )
+
+    pending.to( :running )        .automatically
+
+    running.to( :running )        .on( :reboot )
+    running.to( :shutting_down )  .on( :stop )
+
+    shutting_down.to( :stopped )  .automatically
+
+    stopped.to( :finish )         .automatically
+  end
+
+#--
+# Buckets
+#--
+  def buckets(credentials, opts)
+    bucket_list = []
+    cf = cloudfiles_client(credentials)
+    safely do
+      cf.containers.each do |container_name|
+        current = cf.container(container_name)
+        bucket_list << convert_container(current)
+      end #containers.each
+    end #safely
+    bucket_list = filter_on(bucket_list, :id, opts)
+    bucket_list
+  end
+
+#--
+# Create Bucket
+#--
+  def create_bucket(credentials, name, opts)
+    bucket = nil
+    cf = cloudfiles_client(credentials)
+    safely do
+      new_bucket = cf.create_container(name)
+      bucket = convert_container(new_bucket)
+    end
+    bucket
+  end
+
+#--
+# Delete Bucket
+#--
+  def delete_bucket(credentials, name, opts)
+    cf = cloudfiles_client(credentials)
+    safely do
+      cf.delete_container(name)
+    end
+  end
+
+#--
+# Blobs
+#--
+  def blobs(credentials, opts)
+    cf = cloudfiles_client(credentials)
+    blobs = []
+    safely do
+      cf_container = cf.container(opts['bucket'])
+      cf_container.objects.each do |object_name|
+        blobs << convert_object(cf_container.object(object_name))
+      end
+    end
+    blobs = filter_on(blobs, :id, opts)
+    blobs
+  end
+
+#-
+# Blob data
+#-
+  def blob_data(credentials, bucket_id, blob_id, opts)
+    cf = cloudfiles_client(credentials)
+    cf.container(bucket_id).object(blob_id).data_stream do |chunk|
+      yield chunk
+    end
+  end
+
+private
 
   def convert_srv_to_instance(srv)
     inst = Instance.new(:id => srv["id"].to_s,
@@ -154,17 +252,27 @@ class RackspaceDriver < Deltacloud::BaseDriver
     end
   end
 
-  define_instance_states do
-    start.to( :pending )          .on( :create )
+  def convert_container(cf_container)
+    Bucket.new({ :id => cf_container.name,
+                    :name => cf_container.name,
+                    :size => cf_container.count,
+                    :blob_list => cf_container.objects
+                 })
+  end
 
-    pending.to( :running )        .automatically
+  def convert_object(cf_object)
+    Blob.new({   :id => cf_object.name,
+                 :bucket => cf_object.container.name,
+                 :content_length => cf_object.bytes,
+                 :content_type => cf_object.content_type,
+                 :last_modified => cf_object.last_modified
+              })
+  end
 
-    running.to( :running )        .on( :reboot )
-    running.to( :shutting_down )  .on( :stop )
-
-    shutting_down.to( :stopped )  .automatically
-
-    stopped.to( :finish )         .automatically
+  def cloudfiles_client(credentials)
+    safely do
+      CloudFiles::Connection.new(credentials.user, credentials.password)
+    end
   end
 
   def safely(&block)

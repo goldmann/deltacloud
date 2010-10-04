@@ -120,7 +120,6 @@ class GogridDriver < Deltacloud::BaseDriver
   end
 
   def instances(credentials, opts=nil)
-    require 'ap'
     instances = []
     if opts and opts[:id]
       begin
@@ -190,6 +189,15 @@ class GogridDriver < Deltacloud::BaseDriver
       end
     end
     return creds
+  end
+
+  def valid_credentials?(credentials)
+    client = new_client(credentials)
+    # FIXME: We need to do this call to determine if
+    #        GoGrid is working with given credentials. There is no
+    #        other way to check, if given credentials are valid or not.
+    return false unless new_client(credentials).request('common/lookup/list', { 'lookup' => 'ip.datacenter' })
+    true
   end
 
   define_instance_states do
@@ -276,6 +284,9 @@ class GogridDriver < Deltacloud::BaseDriver
     end
     prof = InstanceProfile.new("server", opts)
 
+    hwp_name = instance['image']['name']
+    state = convert_server_state(instance['state']['name'], instance['id'])
+
     Instance.new(
        # note that we use 'name' as the id here, because newly created instances
        # don't get a real ID until later on.  The name is good enough; from
@@ -287,8 +298,8 @@ class GogridDriver < Deltacloud::BaseDriver
       :instance_profile => prof,
       :name => instance['name'],
       :realm_id => instance['ip']['datacenter']['id'],
-      :state => convert_server_state(instance['state']['name'], instance['id']),
-      :actions => instance_actions_for(convert_server_state(instance['state']['name'], instance['id'])),
+      :state => state,
+      :actions => instance_actions_for(state),
       :public_addresses => [ instance['ip']['ip'] ],
       :private_addresses => [],
       :username => instance['username'],

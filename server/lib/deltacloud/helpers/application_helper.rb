@@ -54,6 +54,13 @@ module ApplicationHelper
     return 'password' if driver_has_feature?(:authentication_password)
   end
 
+  def driver_has_bucket_location_feature?
+    driver.features(:buckets).each do |feat|
+      return true if feat.name == :bucket_location
+    end
+    false
+  end
+
   def filter_all(model)
       filter = {}
       filter.merge!(:id => params[:id]) if params[:id]
@@ -100,8 +107,8 @@ module ApplicationHelper
     return redirect(instances_url) if name.eql?(:destroy) or @instance.class!=Instance
 
     respond_to do |format|
-      format.html { haml :"instances/show" }
       format.xml { haml :"instances/show" }
+      format.html { haml :"instances/show" }
       format.json {convert_to_json(:instance, @instance) }
     end
   end

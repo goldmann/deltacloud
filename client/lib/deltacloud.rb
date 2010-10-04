@@ -33,6 +33,22 @@ module DeltaCloud
     API.new(user_name, password, api_url, &block)
   end
 
+  # Check given credentials if their are valid against
+  # backend cloud provider
+  #
+  # @param [String, user_name] API user name
+  # @param [String, password] API password
+  # @param [String, user_name] API URL (eg. http://localhost:3001/api)
+  # @return [true|false]
+  def self.valid_credentials?(user_name, password, api_url)
+    api=API.new(user_name, password, api_url)
+    result = false
+    api.request(:get, '', :force_auth => '1') do |response|
+      result = true if response.code.eql?(200)
+    end
+    return result
+  end
+
   # Return a API driver for specified URL
   #
   # @param [String, url] API URL (eg. http://localhost:3001/api)
@@ -178,7 +194,12 @@ module DeltaCloud
                     actions << [link['rel'], link[:href]]
                     define_method :"#{link['rel'].sanitize}!" do
                       client.request(:"#{link['method']}", link['href'], {}, {})
-                      client.send(:"#{item.name}", item['id'])
+                      @current_state = client.send(:"#{item.name}", item['id']).state
+                      obj.instance_eval do |o|
+                        def state
+                          @current_state
+                        end
+                      end
                     end
                   end
                   define_method :actions do
@@ -241,15 +262,15 @@ module DeltaCloud
       declare_entry_points_methods(@entry_points)
     end
     
-    def create_instance_credential(opts={}, &block)
+    def create_key(opts={}, &block)
       params = { :name => opts[:name] }
-      instance_credential = nil
-      request(:post, entry_points[:instance_credentials], {}, params) do |response|
-        c = DeltaCloud.define_class("InstanceCredential")
-        instance_credential = base_object(c, :instance_credential, response)
-        yield instance_credential if block_given?
+      key = nil
+      request(:post, entry_points[:keys], {}, params) do |response|
+        c = DeltaCloud.define_class("Key")
+        key = base_object(c, :key, response)
+        yield key if block_given?
       end
-      return instance_credential
+      return key
     end
 
     # Create a new instance, using image +image_id+. Possible optiosn are
