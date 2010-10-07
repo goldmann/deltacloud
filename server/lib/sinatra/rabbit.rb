@@ -55,9 +55,15 @@ module Sinatra
         end
       end
 
-      def control(&block)
+      def control(opts=nil, &block)
         op = self
         @control = Proc.new do
+          if opts and
+              opts[:with_feature] and
+              !driver.respond_to?(opts[:with_feature])
+            raise Deltacloud::BackendFeatureUnsupported.new('501', nil,
+              "#{opts[:with_feature]} not supported by backend", nil)
+          end
           op.validate(params)
           instance_eval(&block)
         end
