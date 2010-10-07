@@ -295,6 +295,12 @@ collection :storage_snapshots do
   end
 end
 
+# get '/api/storage_volumes/new' do
+#   respond_to do |format|
+#     format.html { haml :"storage_volumes/new" }
+#   end
+# end
+
 collection :storage_volumes do
   description "Storage volumes description here"
 
@@ -309,6 +315,57 @@ collection :storage_volumes do
     param :id,          :string,    :required
     control { show(:storage_volume) }
   end
+
+  operation :create do
+    description "Create new storage volume if backend supports them."
+    param :realm_id,     :string, :required
+    param :capacity,         :string, :required
+    control(:with_feature => :create_storage_volume) do
+      volume = driver.create_storage_volume(credentials, params)
+      respond_to do |format|
+        format.xml do
+          response.status = 201  # Created
+          response['Location'] = storage_volume_url(volume.id)
+          @storage_volume = volume
+          haml :"storage_volumes/show"
+        end
+        format.html do
+          redirect storage_volume_url(volume.id) if volume and volume.id
+          redirect storage_volumes_url
+        end
+      end
+    end
+  end
+  
+   operation :destroy do
+    param :id,  :string,  :required
+    control :with_feature => :destroy_storage_volume do
+      driver.destroy_storage_volume(credentials, params[:id])
+      redirect(storage_volumes_url)
+    end
+  end
+
+  operation :attach, :method => :post, :member => true do
+    param :id,  :string,  :required
+    param :instance_id, :string, :required
+    param :device, :string, :required
+    
+    control :with_feature => :attach_storage_volume do
+      volume = driver.attach_storage_volume(credentials, params)
+      redirect storage_volume_url(volume.id)
+    end
+  end
+
+  
+  operation :detach, :method => :post, :member => true do
+    param :id,  :string,  :required
+
+    control :with_feature => :detach_storage_volume do
+      volume = driver.detach_storage_volume(credentials, params[:id])
+      redirect storage_volume_url(volume.id)
+    end
+  end
+
 end
 
 get '/api/keys/new' do

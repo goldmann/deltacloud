@@ -6,8 +6,17 @@
         =volume.created
       %capacity<
         =volume.capacity
+      %state<
+        =volume.state
       - unless volume.device.nil?
         %device<
           =volume.device
       - unless volume.instance_id.nil?
         %instance{:href => instance_url(volume.instance_id), :id => volume.instance_id}
+      %actions
+        - if driver.respond_to?(:destroy_storage_volume)
+          %link{ :rel => "destroy", :method => "delete", :href => destroy_storage_volume_url(volume.id)}
+        - if driver.respond_to?(:attach_storage_volume)
+          %link{ :rel => "attach", :method => "post", :href => attach_storage_volume_url(volume.id)}
+        - if driver.respond_to?(:detach_storage_volume)
+          %link{ :rel => "detach", :method => "post", :href => detach_storage_volume_url(volume.id)}

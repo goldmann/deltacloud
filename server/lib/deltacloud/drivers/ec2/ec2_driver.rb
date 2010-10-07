@@ -258,6 +258,40 @@ class EC2Driver < Deltacloud::BaseDriver
     volumes
   end
 
+  def create_storage_volume(credentials, opts)
+    ec2 = new_client( credentials )
+    safely do
+      ec2_volume = ec2.create_volume(
+        :availability_zone => opts[:realm_id],
+        :size => opts[:capacity]
+      )
+      return convert_volume( ec2_volume )
+    end
+  end
+
+  def destroy_storage_volume(credentials, id)
+    ec2 = new_client(credentials)
+    ec2.delete_volume( :volume_id => id )
+    storage_volumes( credentials, :id => id ).first
+  end
+
+  def attach_storage_volume(credentials, opts)
+    ec2 = new_client(credentials)
+    id = opts[:id]
+    ec2.attach_volume(
+                      :volume_id => id,
+                      :instance_id => opts[:instance_id],
+                      :device => opts[:device]
+                      )
+    storage_volumes( credentials, :id => id ).first
+  end
+
+  def detach_storage_volume(credentials, id)
+    ec2 = new_client(credentials)
+    ec2.detach_volume( :volume_id => id )
+    storage_volumes( credentials, :id => id ).first
+  end
+  
   #
   # Storage Snapshots
   #

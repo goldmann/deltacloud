@@ -192,8 +192,8 @@ module DeltaCloud
                   actions = []
                   attribute.xpath('link').each do |link|
                     actions << [link['rel'], link[:href]]
-                    define_method :"#{link['rel'].sanitize}!" do
-                      client.request(:"#{link['method']}", link['href'], {}, {})
+                  define_method :"#{link['rel'].sanitize}!" do |*params|
+                      client.request(:"#{link['method']}", link['href'], {}, params.first || {})
                       @current_state = client.send(:"#{item.name}", item['id']).state
                       obj.instance_eval do |o|
                         def state
@@ -315,6 +315,21 @@ module DeltaCloud
       end
 
       return instance
+    end
+
+
+    def create_storage_volume(opts={}, &block)
+      params = opts.dup
+      params[:realm_id] ||= params.delete(:realm)
+      storage_volume = nil
+      
+      request(:post, entry_points[:storage_volumes], {}, params) do |response|
+        c = DeltaCloud.define_class("StorageVolume")
+        storage_volume = base_object(c, :storage_volume, response)
+        yield storage_volume if block_given?
+      end
+
+      storage_volume
     end
 
     # Basic request method
