@@ -352,7 +352,17 @@ collection :storage_volumes do
     
     control :with_feature => :attach_storage_volume do
       volume = driver.attach_storage_volume(credentials, params)
-      redirect storage_volume_url(volume.id)
+      respond_to do |format|
+        format.xml do
+          response.status = 200
+          response['Location'] = storage_volume_url(volume.id)
+          @storage_volume = volume
+          haml :"storage_volumes/show"
+        end
+        format.html do
+          redirect storage_volume_url(volume.id)
+        end
+      end
     end
   end
 
@@ -362,7 +372,17 @@ collection :storage_volumes do
 
     control :with_feature => :detach_storage_volume do
       volume = driver.detach_storage_volume(credentials, params[:id])
-      redirect storage_volume_url(volume.id)
+      respond_to do |format|
+        format.xml do
+          response.status = 200
+          response['Location'] = storage_volume_url(volume.id)
+          @storage_volume = volume
+          haml :"storage_volumes/show"
+        end
+        format.html do
+          redirect storage_volume_url(volume.id)
+        end
+      end
     end
   end
 
