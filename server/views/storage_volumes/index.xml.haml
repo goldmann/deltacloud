@@ -8,9 +8,10 @@
         =volume.capacity
       %state<
         =volume.state
-      - unless volume.device.nil?
-        %device<
-          =volume.device
+      %device<
+        =volume.device
+      %instance_id<
+        =volume.instance_id
       - unless volume.instance_id.nil?
         %instance{:href => instance_url(volume.instance_id), :id => volume.instance_id}
       %actions

@@ -8,7 +8,12 @@
     =@storage_volume.device
   %state<
     =@storage_volume.state
-  %instance{:href => @storage_volume.instance_id, :id => @storage_volume.instance_id}
+  %device<
+    =@storage_volume.device
+  %instance_id<
+    =@storage_volume.instance_id
+  - unless @storage_volume.instance_id.nil?
+    %instance{:href => instance_url(@storage_volume.instance_id), :id => @storage_volume.instance_id}
   %actions
     - if driver.respond_to?(:destroy_storage_volume)
       %link{ :rel => "destroy", :method => "delete", :href => destroy_storage_volume_url(@storage_volume.id)}
