@@ -514,13 +514,15 @@ class EC2Driver < Deltacloud::BaseDriver
   end
 
   def convert_volume(ec2_volume)
+    attachment = ec2_volume.attachmentSet.item.first if ec2_volume.attachmentSet
+    attachment ||= { }
     StorageVolume.new( {
       :id=>ec2_volume['volumeId'],
       :created=>ec2_volume['createTime'],
       :state=>ec2_volume['status'].upcase,
       :capacity=>ec2_volume['size'],
-      :instance_id=>ec2_volume['snapshotId'],
-      :device=>ec2_volume['attachmentSet'],
+      :instance_id=>attachment['instanceId'],
+      :device=>attachment['device'],
     } )
   end
 
