@@ -22,7 +22,7 @@ Gem::Specification.new do |s|
   s.author = 'Red Hat, Inc.'
   s.homepage = "http://www.deltacloud.org"
   s.email = 'deltacloud-users@lists.fedorahosted.org'
-  s.name = 'bbrowning-deltacloud-core'
+  s.name = 'steamcannon-deltacloud-core'
 
   s.description = <<-EOF
     The Deltacloud API is built as a service-based REST API.
