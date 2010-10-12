@@ -72,6 +72,8 @@ Gem::Specification.new do |s|
   s.add_dependency('thin', '>= 1.2.5') if s.platform.to_s == 'ruby'
   s.add_dependency('rerun', '>= 0.5.2') if s.platform.to_s == 'ruby'
   s.add_dependency('json', '>= 1.1.9')
+  s.add_dependency('aws', '>= 2.3.21')
+  s.add_dependency('amazon-ec2', '>= 0.9.15')
   s.add_development_dependency('compass', '>= 0.8.17')
   s.add_development_dependency('nokogiri', '>= 1.4.1')
   s.add_development_dependency('rack-test', '>= 0.5.3')
