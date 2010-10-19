@@ -423,7 +423,7 @@ collection :keys do
       @key = driver.create_key(credentials, { :key_name => params[:name] })
       respond_to do |format|
         format.html { haml :"keys/show" }
-        format.xml { haml :"keys/show" }
+        format.xml { haml :"keys/show", :ugly => true }
       end
     end
   end
