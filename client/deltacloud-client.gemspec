@@ -21,9 +21,9 @@ Gem::Specification.new do |s|
   s.author = 'Red Hat, Inc.'
   s.homepage = "http://www.deltacloud.org"
   s.email = 'deltacloud-users@lists.fedorahosted.org'
-  s.name = 'deltacloud-client'
+  s.name = 'steamcannon-deltacloud-client'
   s.description = %q{Deltacloud REST Client for API}
-  s.version = '0.1.1'
+  s.version = '0.1.1.1'
   s.summary = %q{Deltacloud REST Client}
   s.files = Dir['Rakefile', 'lib/**/*.rb', 'init.rb', 'bin/deltacloudc']
   s.bindir = 'bin'
